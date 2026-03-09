@@ -1,16 +1,26 @@
+import asyncio
 import os
 from typing import Generator
+
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.chat_history import InMemoryChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.messages import HumanMessage, AIMessageChunk, SystemMessage
+from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
+
+from tools.mcp_tools import load_tools
 from logger import get_logger
 
 log = get_logger(__name__)
 
 SYSTEM_PROMPT = (
     "You are a terse workplace safety assistant for a PPE compliance monitoring system. "
-    "Answer ONLY from the detection context provided. Respond in 1-3 short sentences max.\n\n"
+    "You have access to read-only PostgreSQL tools via an MCP server. "
+    "Use execute_sql to run SELECT queries and answer questions with real data.\n\n"
+    "Database schema:\n"
+    "  persons(track_id INTEGER PK, first_seen TIMESTAMP, last_seen TIMESTAMP)\n"
+    "  person_observations(id SERIAL PK, track_id INTEGER FK→persons, "
+    "timestamp TIMESTAMP, hardhat BOOLEAN, vest BOOLEAN, mask BOOLEAN)\n"
+    "  A 'violation' means the PPE column is FALSE. NULL means not detected.\n\n"
     "Scope (reject anything else with a one-line refusal):\n"
     "• Worker/people counts\n"
     "• Hardhat compliance (counts & rates)\n"
@@ -18,10 +28,11 @@ SYSTEM_PROMPT = (
     "• Overall PPE compliance\n"
     "• Brief safety summaries & recommendations\n\n"
     "Rules:\n"
-    "1. Use only the provided context — never speculate.\n"
-    "2. If data is missing, say so in one sentence.\n"
-    "3. Prefer numbers and percentages over prose.\n"
-    "4. No greetings, filler words."
+    '2. Use tools ONLY if given the answer for the question doesnt exist in "on the screen".\n'
+    "3. DO NOT use tools if the user asks without a timeframe.\n"
+    "4. Prefer numbers and percentages over prose.\n"
+    "5. No greetings, filler words.\n"
+    "6. Respond in 1-3 short sentences max."
 )
 
 
@@ -45,45 +56,59 @@ class LLMChat:
             streaming=True,
         )
 
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", SYSTEM_PROMPT),
-                MessagesPlaceholder(variable_name="history"),
-                ("human", "Current detection context:\n{context}\n\nQuestion: {input}"),
-            ]
+        tools = asyncio.run(load_tools())
+
+        self._memory = MemorySaver()
+        self._agent = create_react_agent(
+            llm,
+            tools,
+            prompt=SYSTEM_PROMPT,
+            checkpointer=self._memory,
+        )
+        self._session_versions: dict[str, int] = {}
+
+        log.info(
+            "LLMChat initialised — endpoint=%s, model=%s, mcp_tools=%d",
+            endpoint,
+            model,
+            len(tools),
         )
 
-        self._sessions: dict[str, InMemoryChatMessageHistory] = {}
-        self._chain = RunnableWithMessageHistory(
-            prompt | llm,
-            self._get_session_history,
-            input_messages_key="input",
-            history_messages_key="history",
-        )
+    def _thread_id(self, session_id: str) -> str:
+        version = self._session_versions.get(session_id, 0)
+        return f"{session_id}:{version}" if version else session_id
 
-        log.info(f"LLMChat initialised — endpoint={endpoint}, model={model}")
+    def _build_input(self, question: str, context: str) -> dict:
+        return {
+            "messages": [
+                SystemMessage(content=f"The user sees on the screen:\n{context}"),
+                HumanMessage(content=f"User question: {question}"),
+            ],
+        }
 
-    def _get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
-        if session_id not in self._sessions:
-            self._sessions[session_id] = InMemoryChatMessageHistory()
-        return self._sessions[session_id]
-
-    def ask_question(
+    def chat(
         self,
         question: str,
         context: str,
         session_id: str = "default",
     ) -> str:
-        """Send a question with context through the conversational chain.
+        """Send a question with context through the conversational agent.
 
         Every prior exchange in *session_id* is automatically included so the
         model can reference earlier questions and answers.
+
+        Uses ainvoke because MCP tools are async-only.
         """
-        response = self._chain.invoke(
-            {"input": question, "context": context},
-            config={"configurable": {"session_id": session_id}},
+        print(f"question: {question}")
+        print(f"context: {context}")
+
+        response = asyncio.run(
+            self._agent.ainvoke(
+                self._build_input(question, context),
+                config={"configurable": {"thread_id": self._thread_id(session_id)}},
+            )
         )
-        return response.content
+        return response["messages"][-1].content
 
     def stream_question(
         self,
@@ -95,15 +120,30 @@ class LLMChat:
 
         Conversation history is updated automatically once the full stream
         has been consumed.
+
+        Uses astream because MCP tools are async-only.
         """
-        for chunk in self._chain.stream(
-            {"input": question, "context": context},
-            config={"configurable": {"session_id": session_id}},
-        ):
-            if chunk.content:
-                yield chunk.content
+
+        async def _astream():
+            chunks = []
+            async for msg, _metadata in self._agent.astream(
+                self._build_input(question, context),
+                config={"configurable": {"thread_id": self._thread_id(session_id)}},
+                stream_mode="messages",
+            ):
+                if (
+                    isinstance(msg, AIMessageChunk)
+                    and msg.content
+                    and not msg.tool_calls
+                ):
+                    chunks.append(msg.content)
+            return chunks
+
+        for chunk in asyncio.run(_astream()):
+            yield chunk
 
     def clear_history(self, session_id: str = "default") -> None:
         """Clear the conversation history for a session."""
-        if session_id in self._sessions:
-            self._sessions[session_id].clear()
+        self._session_versions[session_id] = (
+            self._session_versions.get(session_id, 0) + 1
+        )

@@ -88,6 +88,16 @@ postgresql:
   storage:
     size: 5Gi
 
+# Postgres MCP server (read-only SSE access for the LLM agent)
+postgresMcp:
+  enabled: true
+  image:
+    repository: docker.io/crystaldba/postgres-mcp
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 8000
+  accessMode: "restricted"
+
 data:
   image:
     repository: quay.io/rh-ai-quickstart/ppe-compliance-monitor-data

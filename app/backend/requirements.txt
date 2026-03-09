@@ -13,3 +13,4 @@ psycopg2-binary
 deep-sort-realtime
 langchain
 langchain-openai
+langchain-mcp-adapters

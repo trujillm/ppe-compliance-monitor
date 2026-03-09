@@ -194,11 +194,13 @@ def generate_response_frames():
             last_sent_frame_id = frame_id
             now = time.time()
             if now - last_frame_log >= 10.0:
-                log.info("Video feed: sent %d frames (stream active)", frame_count)
+                log.debug("Video feed: sent %d frames (stream active)", frame_count)
                 last_frame_log = now
             # Frame writer: log before/after yield to detect if browser stopped consuming
             if frame_count % 10 == 0:
-                log.info("Frame writer: about to send frame %d to browser", frame_count)
+                log.debug(
+                    "Frame writer: about to send frame %d to browser", frame_count
+                )
             try:
                 # Content-Length helps Chrome parse each part correctly (avoids distortion from boundary misparsing)
                 header = (
@@ -208,18 +210,18 @@ def generate_response_frames():
                 )
                 yield header + frame_bytes + b"\r\n"
                 if frame_count % 10 == 0:
-                    log.info(
+                    log.debug(
                         "Frame writer: sent frame %d (browser consumed)", frame_count
                     )
             except (BrokenPipeError, ConnectionResetError, OSError) as e:
                 log.warning("Video feed: client connection lost during yield: %s", e)
                 break
     except GeneratorExit:
-        log.info("Video feed: client disconnected (GeneratorExit)")
+        log.debug("Video feed: client disconnected (GeneratorExit)")
     except Exception as e:
         log.exception("Video feed: exception in stream loop: %s", e)
     finally:
-        log.info("Video feed: stream ended (total frames sent: %d)", frame_count)
+        log.debug("Video feed: stream ended (total frames sent: %d)", frame_count)
 
 
 @api.route("/video_feed")
@@ -269,10 +271,10 @@ def chat():
     # Read from shared state for freshest context
     with demo._display_lock:
         desc = demo._display_description or latest_description
-        summ = demo._display_summary or demo.latest_summary or latest_summary
-    context = desc + " " + summ
+        # summ = demo._display_summary or demo.latest_summary or latest_summary
+    context = desc.replace("Detected: ", "", 1)  # + " " + summ
 
-    answer = llm_chat.ask_question(
+    answer = llm_chat.chat(
         question=question,
         context=context,
         session_id=session_id,
