@@ -13,7 +13,8 @@ help:
 	@echo "  undeploy   - Remove manifests from OpenShift"
 	@echo "  dev-backend - Create venv, install deps, run backend"
 	@echo "  dev-frontend - Install deps and run frontend"
-	@echo "  kill-ports   - Kill processes using required ports (3000, 8888, 8080, 8081, 9000, 9001)"
+	@echo "  eval         - Run LLM chat evaluation (readable output)"
+	@echo "  eval-json    - Same + save eval_results.json"
 
 
 # Load .env file if it exists
@@ -70,7 +71,7 @@ check-openai-env:
 local-up: local-build kill-ports
 	VIDEO_STREAM_URL="$(VIDEO_STREAM_URL)" PODMAN_DEFAULT_PLATFORM=$(PLATFORM_LOCAL) podman-compose -f $(COMPOSE_FILE) up
 
-local-build-up: kill-ports
+local-build-up: kill-ports local-down
 	VIDEO_STREAM_URL="$(VIDEO_STREAM_URL)" PODMAN_DEFAULT_PLATFORM=$(PLATFORM_LOCAL) podman-compose -f $(COMPOSE_FILE) up --build
 
 local-build:
@@ -182,6 +183,12 @@ kill-ports: ## Kill processes using required ports
 		fuser -k 5432/tcp 2>/dev/null || true; \
 	fi
 	@echo "   ✓ PostgreSQL 5432 killed"
+	@if [ "$$(uname)" = "Darwin" ]; then \
+		lsof -ti :8000 | xargs kill -9 2>/dev/null || true; \
+	else \
+		fuser -k 8000/tcp 2>/dev/null || true; \
+	fi
+	@echo "   ✓ Postgres MCP 8000 killed"
 	@if [ "$$(uname)" = "Darwin" ]; then \
 		lsof -ti :8554 | xargs kill -9 2>/dev/null || true; \
 	else \

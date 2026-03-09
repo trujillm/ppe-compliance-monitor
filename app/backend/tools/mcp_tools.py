@@ -12,7 +12,7 @@ from logger import get_logger
 
 log = get_logger(__name__)
 
-POSTGRES_MCP_URL = os.environ["POSTGRES_MCP_URL"]
+POSTGRES_MCP_URL = os.getenv("POSTGRES_MCP_URL")
 
 _mcp_client = MultiServerMCPClient(
     {

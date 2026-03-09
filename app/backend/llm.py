@@ -23,15 +23,15 @@ SYSTEM_PROMPT = (
     "  A 'violation' means the PPE column is FALSE. NULL means not detected.\n\n"
     "Scope (reject anything else with a one-line refusal):\n"
     "• Worker/people counts\n"
-    "• Hardhat compliance (counts & rates)\n"
-    "• Safety vest compliance (counts & rates)\n"
+    "• Hardhat compliance (counts and rates)\n"
+    "• Safety vest compliance (counts and rates)\n"
     "• Overall PPE compliance\n"
-    "• Brief safety summaries & recommendations\n\n"
+    "• Brief safety summaries and recommendations\n\n"
     "Rules:\n"
-    '2. Use tools ONLY if given the answer for the question doesnt exist in "on the screen".\n'
-    "3. DO NOT use tools if the user asks without a timeframe.\n"
+    '2. Use tools ONLY if the answer to the question does not exist "on the screen."\n'
+    "3. DO NOT use tools if the user asks without specifying a timeframe.\n"
     "4. Prefer numbers and percentages over prose.\n"
-    "5. No greetings, filler words.\n"
+    "5. No greetings or filler words.\n"
     "6. Respond in 1-3 short sentences max."
 )
 
@@ -99,8 +99,8 @@ class LLMChat:
 
         Uses ainvoke because MCP tools are async-only.
         """
-        print(f"question: {question}")
-        print(f"context: {context}")
+        log.debug(f"question: {question}")
+        log.debug(f"context: {context}")
 
         response = asyncio.run(
             self._agent.ainvoke(
