@@ -92,4 +92,8 @@ spec:
               value: {{ .Values.postgresql.password | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.backend.logLevel | quote }}
+            {{- if .Values.postgresMcp.enabled }}
+            - name: POSTGRES_MCP_URL
+              value: "http://{{ include "ppe-compliance-monitor.fullname" . }}-postgres-mcp:{{ .Values.postgresMcp.port }}/sse"
+            {{- end }}
             {{- end }}

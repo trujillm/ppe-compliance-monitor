@@ -48,6 +48,21 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # Postgres MCP server (read-only access for the LLM agent)
+  postgres-mcp:
+    image: docker.io/crystaldba/postgres-mcp:latest
+    container_name: postgres-mcp
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment:
+      DATABASE_URI: "postgresql://ppe_user:ppe_password@postgresql:5432/ppe_tracking"
+    command: ["--access-mode=restricted", "--transport=sse"]
+    ports:
+      - "8000:8000"
+    networks:
+      - ppe
+
   # RTSP server for video streaming (MP4 simulation or real camera proxy)
   video-stream:
     image: docker.io/bluenviron/mediamtx:latest
@@ -113,8 +128,11 @@ services:
         condition: service_healthy
       postgresql:
         condition: service_healthy
+      postgres-mcp:
+        condition: service_started
     environment:
       CORS_ORIGINS: "http://localhost:3000,http://0.0.0.0:3000,http://127.0.0.1:3000"
+      POSTGRES_MCP_URL: "http://postgres-mcp:8000/sse"
       # Video stream (RTSP) - set via Makefile VIDEO_STREAM_URL or env
       VIDEO_STREAM_URL: ${VIDEO_STREAM_URL:-rtsp://video-stream:8554/live}
       # MinIO configuration (for model; video comes from stream when VIDEO_STREAM_URL set)

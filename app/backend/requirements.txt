@@ -12,4 +12,6 @@ torchvision
 psycopg2-binary
 deep-sort-realtime
 langchain
+langgraph
 langchain-openai
+langchain-mcp-adapters
