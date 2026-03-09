@@ -298,7 +298,7 @@ def _inference_process_target(
 
             duration_ms = (time.perf_counter() - t0) * 1000
             if duration_ms > 100:
-                log.info(
+                log.debug(
                     "Inference: frame %d took %.0fms",
                     frame_count,
                     duration_ms,
@@ -541,14 +541,14 @@ class MultiModalAIDemo:
             success, frame = cap.read()
             if success and frame is not None:
                 if fail_count > 0:
-                    log.info(
+                    log.debug(
                         "Frame reader: recovered after %d consecutive failures",
                         fail_count,
                     )
                 fail_count = 0
                 read_count += 1
                 if read_count % 10 == 0:
-                    log.info(
+                    log.debug(
                         "Frame reader: received %d frames from stream",
                         read_count,
                     )
@@ -564,7 +564,7 @@ class MultiModalAIDemo:
                         "Frame reader: first consecutive failure (cap.read returned False)"
                     )
                 elif fail_count in (5, 10, 15, 20, 25):
-                    log.info("Frame reader: %d consecutive failures", fail_count)
+                    log.debug("Frame reader: %d consecutive failures", fail_count)
                 if fail_count >= 30:
                     self._reconnect_needed = True
                     log.warning(
