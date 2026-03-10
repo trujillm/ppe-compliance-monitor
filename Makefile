@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help local-up local-build-up local-down build push deploy undeploy dev-backend dev-frontend local-build build-push-data kill-ports check-openai-env
+.PHONY: help local-up local-build-up local-down build push deploy undeploy dev-backend dev-frontend local-build build-push-data kill-ports check-openai-env eval eval-json eval-pytest
 help:
 	@echo "Available targets:"
 	@echo "  local-up   - Start local stack with Podman Compose"
@@ -68,9 +68,6 @@ check-openai-env:
 		echo "==> OpenAI environment variables loaded from .env"; \
 	fi
 
-local-up: local-build kill-ports
-	VIDEO_STREAM_URL="$(VIDEO_STREAM_URL)" PODMAN_DEFAULT_PLATFORM=$(PLATFORM_LOCAL) podman-compose -f $(COMPOSE_FILE) up
-
 local-build-up: kill-ports local-down
 	VIDEO_STREAM_URL="$(VIDEO_STREAM_URL)" PODMAN_DEFAULT_PLATFORM=$(PLATFORM_LOCAL) podman-compose -f $(COMPOSE_FILE) up --build
 
@@ -129,15 +126,6 @@ deploy: check-openai-env
 undeploy:
 	@if [ -n "$(NAMESPACE)" ]; then oc project "$(NAMESPACE)"; fi
 	@helm uninstall $(HELM_RELEASE) --namespace $(NAMESPACE) 2>/dev/null || echo "Release $(HELM_RELEASE) not found (already uninstalled or never deployed)."
-
-dev-backend:
-	$(PYTHON) -m venv $(VENV_DIR)
-	. $(VENV_DIR)/bin/activate && pip install -r $(BACKEND_DIR)/requirements.txt
-	. $(VENV_DIR)/bin/activate && VIDEO_STREAM_URL="$(VIDEO_STREAM_URL)" $(PYTHON) $(BACKEND_DIR)/app.py
-
-dev-frontend:
-	cd $(FRONTEND_DIR) && npm install
-	cd $(FRONTEND_DIR) && npm start
 
 kill-ports: ## Kill processes using required ports
 	@echo "Killing processes on application ports..."
