@@ -4,7 +4,7 @@ from typing import Generator
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessageChunk, SystemMessage
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langgraph.checkpoint.memory import MemorySaver
 
 from tools.mcp_tools import load_tools
@@ -59,10 +59,10 @@ class LLMChat:
         tools = asyncio.run(load_tools())
 
         self._memory = MemorySaver()
-        self._agent = create_react_agent(
+        self._agent = create_agent(
             llm,
             tools,
-            prompt=SYSTEM_PROMPT,
+            system_prompt=SYSTEM_PROMPT,
             checkpointer=self._memory,
         )
         self._session_versions: dict[str, int] = {}
