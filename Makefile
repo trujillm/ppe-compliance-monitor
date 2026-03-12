@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help local-up local-build-up local-down build push deploy undeploy dev-backend dev-frontend local-build build-push-data kill-ports check-openai-env eval
+.PHONY: help local-up local-build-up local-down build push deploy undeploy dev-backend dev-frontend local-build build-push-data kill-ports check-openai-env eval eval-k8s
 help:
 	@echo "Available targets:"
 	@echo "  local-up   - Start local stack with Podman Compose"
@@ -13,7 +13,8 @@ help:
 	@echo "  undeploy   - Remove manifests from OpenShift"
 	@echo "  dev-backend - Create venv, install deps, run backend"
 	@echo "  dev-frontend - Install deps and run frontend"
-	@echo "  eval         - Run LLM chat evaluation against the running backend"
+	@echo "  eval         - Run LLM chat evaluation against the running backend (local)"
+	@echo "  eval-k8s     - Run LLM chat evaluation against the deployed K8s backend (helm test)"
 
 
 # Load .env file if it exists
@@ -126,9 +127,11 @@ undeploy:
 	@if [ -n "$(NAMESPACE)" ]; then oc project "$(NAMESPACE)"; fi
 	@helm uninstall $(HELM_RELEASE) --namespace $(NAMESPACE) 2>/dev/null || echo "Release $(HELM_RELEASE) not found (already uninstalled or never deployed)."
 
-eval: check-openai-env ## Run LLM chat evaluation against the running backend.
+eval: check-openai-env ## Run LLM chat evaluation against the running backend (local).
 	podman-compose -f $(COMPOSE_FILE) --profile eval run --rm --no-deps --build backend-eval
 
+eval-k8s: ## Run LLM chat evaluation against the deployed K8s backend (helm test).
+	helm test $(HELM_RELEASE) --namespace $(NAMESPACE) --logs
 
 kill-ports: ## Kill processes using required ports
 	@echo "Killing processes on application ports..."
