@@ -1,0 +1,29 @@
+name: Build and Push Eval Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/evals/**'
+      - '.github/workflows/build-eval.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'app/evals/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: ./.github/workflows/reusable-docker-build.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image_name: rh-ai-quickstart/ppe-compliance-monitor-evals
+      context: ./app/evals
+      dockerfile: ./app/evals/Containerfile
+    secrets:
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}

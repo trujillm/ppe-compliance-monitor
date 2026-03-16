@@ -98,6 +98,13 @@ postgresMcp:
   port: 8000
   accessMode: "restricted"
 
+eval:
+  enabled: true
+  image:
+    repository: quay.io/rh-ai-quickstart/ppe-compliance-monitor-evals
+    tag: latest
+    pullPolicy: Always
+
 data:
   image:
     repository: quay.io/rh-ai-quickstart/ppe-compliance-monitor-data

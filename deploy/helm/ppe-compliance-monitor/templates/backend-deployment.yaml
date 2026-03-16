@@ -41,6 +41,22 @@ spec:
           ports:
             - containerPort: {{ .Values.backend.port }}
               name: http
+          readinessProbe:
+            httpGet:
+              path: /api/
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /api/
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
           env:
             - name: CORS_ORIGINS
               value: {{ default (printf "http://%s-frontend:%d" (include "ppe-compliance-monitor.fullname" .) .Values.frontend.port) .Values.backend.corsOrigins | quote }}
