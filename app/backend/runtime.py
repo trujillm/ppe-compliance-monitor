@@ -1,13 +1,26 @@
+import json
 import numpy as np
 import cv2
 import os
 import time
+from ovmsclient import make_grpc_client
 
-from ovmsclient import make_grpc_client, make_http_client
+import requests as http_requests
+
 from logger import get_logger
 from response import Detection, postprocess_image
 
 log = get_logger(__name__)
+
+NUMPY_DTYPE_MAP = {
+    "FP32": np.float32,
+    "FP16": np.float16,
+    "INT32": np.int32,
+    "INT64": np.int64,
+    "INT8": np.int8,
+    "UINT8": np.uint8,
+    "BOOL": bool,
+}
 
 
 class Runtime:
@@ -16,10 +29,21 @@ class Runtime:
         self.input_name = os.getenv("MODEL_INPUT_NAME")
         self.model_name = os.getenv("MODEL_NAME")
         self.model_version = int(os.getenv("MODEL_VERSION"))
+
+        runtime_type = os.getenv("RUNTIME_TYPE", "openvino").lower()
         openshift_mode = os.getenv("OPENSHIFT", "false").lower() == "true"
-        self.inference_fun = (
-            self.remote_inference if openshift_mode else self.local_inference
-        )
+
+        if runtime_type == "kserve":
+            self._session = http_requests.Session()
+            self._infer_url = f"{self.service_url}/v2/models/{self.model_name}/infer"
+            self.inference_fun = self.kserve_inference
+        elif openshift_mode:
+            grpc_url = self.service_url.replace("https://", "").replace("http://", "")
+            self._grpc_client = make_grpc_client(grpc_url)
+            self.inference_fun = self.remote_inference
+        else:
+            self._grpc_client = make_grpc_client(self.service_url)
+            self.inference_fun = self.local_inference
         # 10 PPE classes from the model metadata
         self.CLASSES = {
             0: "Hardhat",
@@ -63,23 +87,60 @@ class Runtime:
 
     def local_inference(self, image: np.ndarray) -> np.ndarray:
         """
-        Local inference the image for the model.
+        Local inference via persistent gRPC connection to OVMS.
         """
-        client = make_grpc_client(self.service_url)
         inputs = {self.input_name: image}
-        response = client.predict(inputs, self.model_name, self.model_version)
-        return response
+        return self._grpc_client.predict(inputs, self.model_name, self.model_version)
 
     def remote_inference(self, image: np.ndarray) -> np.ndarray:
         """
-        Remote inference the image for the model.
+        Remote inference via persistent gRPC connection to OVMS (binary protobuf).
         """
-        http_url = self.service_url.replace("https://", "").replace("http://", "")
-
-        client = make_http_client(http_url)
-
         inputs = {self.input_name: image}
-        return client.predict(inputs, self.model_name, self.model_version, timeout=60.0)
+        return self._grpc_client.predict(inputs, self.model_name, self.model_version)
+
+    def kserve_inference(self, image: np.ndarray) -> np.ndarray:
+        """
+        Inference via KServe V2/Open Inference Protocol with binary tensor
+        extension.  Sends/receives raw bytes instead of JSON arrays, avoiding
+        the massive serialization overhead for large tensors.
+        """
+        input_bytes = image.astype(np.float32).tobytes()
+        header_json = {
+            "inputs": [
+                {
+                    "name": self.input_name,
+                    "shape": list(image.shape),
+                    "datatype": "FP32",
+                    "parameters": {"binary_data_size": len(input_bytes)},
+                }
+            ],
+            "outputs": [{"name": "output0", "parameters": {"binary_data": True}}],
+        }
+        header_bytes = json.dumps(header_json).encode("utf-8")
+
+        resp = self._session.post(
+            self._infer_url,
+            data=header_bytes + input_bytes,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Inference-Header-Content-Length": str(len(header_bytes)),
+            },
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+
+        header_len = int(resp.headers["Inference-Header-Content-Length"])
+        resp_body = resp.content
+        resp_header = json.loads(resp_body[:header_len])
+        binary_buf = resp_body[header_len:]
+
+        output = resp_header["outputs"][0]
+        dtype = NUMPY_DTYPE_MAP.get(output["datatype"], np.float32)
+        byte_size = output["parameters"]["binary_data_size"]
+        return np.frombuffer(binary_buf[:byte_size], dtype=dtype).reshape(
+            output["shape"]
+        )
 
     def run(self, image: np.ndarray) -> list[Detection]:
         """

@@ -14,8 +14,26 @@ OVMS_IMAGE = (
 def load_config():
     """Load deployment configuration from environment variables."""
     namespace = os.getenv("NAMESPACE", "ppe-compliance-monitor")
+
+    runtime_args_raw = os.getenv("RUNTIME_ARGS", "[]")
+    runtime_command_raw = os.getenv("RUNTIME_COMMAND", "[]")
+    runtime_env_raw = os.getenv("RUNTIME_ENV", "{}")
+    try:
+        runtime_args = json.loads(runtime_args_raw)
+    except (json.JSONDecodeError, TypeError):
+        runtime_args = []
+    try:
+        runtime_command = json.loads(runtime_command_raw)
+    except (json.JSONDecodeError, TypeError):
+        runtime_command = []
+    try:
+        runtime_env = json.loads(runtime_env_raw)
+    except (json.JSONDecodeError, TypeError):
+        runtime_env = {}
+
     return {
         "namespace": namespace,
+        "runtime_type": os.getenv("RUNTIME_TYPE", "openvino").lower(),
         "deploy_enabled": os.getenv("DEPLOY_MODEL", "true").lower() == "true",
         "minio_access_key": os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
         "minio_secret_key": os.getenv("MINIO_SECRET_KEY", "minioadmin"),
@@ -25,6 +43,11 @@ def load_config():
         "runtime_image": os.getenv("SERVING_RUNTIME_IMAGE", OVMS_IMAGE),
         "rest_port": int(os.getenv("REST_PORT", "8888")),
         "grpc_port": int(os.getenv("GRPC_PORT", "8001")),
+        "runtime_args": runtime_args,
+        "runtime_command": runtime_command,
+        "runtime_env": runtime_env,
+        "runtime_template_name": os.getenv("RUNTIME_TEMPLATE_NAME", ""),
+        "runtime_template_display_name": os.getenv("RUNTIME_TEMPLATE_DISPLAY_NAME", ""),
         "model_format": os.getenv("MODEL_FORMAT", "pytorch"),
         "model_format_version": os.getenv("MODEL_FORMAT_VERSION", "2"),
         "deploy_from_registry": os.getenv("DEPLOY_FROM_REGISTRY", "false").lower()
@@ -50,6 +73,9 @@ def load_config():
                 "memory": os.getenv("RESOURCE_LIM_MEMORY", "4Gi"),
             },
         },
+        "gpu_enabled": os.getenv("GPU_ENABLED", "false").lower() == "true",
+        "gpu_count": os.getenv("GPU_COUNT", "1"),
+        "gpu_tolerations": json.loads(os.getenv("GPU_TOLERATIONS", "[]")),
     }
 
 
@@ -360,6 +386,91 @@ def build_serving_runtime_spec(cfg):
     }
 
 
+def _build_triton_args(cfg):
+    """Build Triton Inference Server container args for KServe single-model serving."""
+    return [
+        "tritonserver",
+        "--model-store=/mnt/models",
+        f"--http-port={cfg['rest_port']}",
+        f"--grpc-port={cfg['grpc_port']}",
+        "--allow-http=true",
+        "--allow-grpc=true",
+        "--strict-model-config=false",
+    ]
+
+
+def build_kserve_serving_runtime_spec(cfg):
+    """Build a KServe ServingRuntime using NVIDIA Triton Inference Server.
+
+    GPU-accelerated ONNX serving with V2/OIP REST protocol.
+    Configurable via values.yaml (image, args, command, env).
+    """
+    template_name = cfg.get("runtime_template_name") or "kserve-tritonserver"
+    template_display = (
+        cfg.get("runtime_template_display_name") or "NVIDIA Triton Inference Server"
+    )
+
+    container = {
+        "name": "kserve-container",
+        "image": cfg["runtime_image"],
+        "args": cfg.get("runtime_args") or _build_triton_args(cfg),
+        "ports": [
+            {
+                "containerPort": cfg["rest_port"],
+                "protocol": "TCP",
+            }
+        ],
+        "volumeMounts": [
+            {"name": "shm", "mountPath": "/dev/shm"},
+        ],
+    }
+    if cfg.get("runtime_command"):
+        container["command"] = cfg["runtime_command"]
+
+    env_list = [{"name": k, "value": v} for k, v in cfg.get("runtime_env", {}).items()]
+    if env_list:
+        container["env"] = env_list
+
+    return {
+        "apiVersion": "serving.kserve.io/v1alpha1",
+        "kind": "ServingRuntime",
+        "metadata": {
+            "name": cfg["serving_runtime"],
+            "namespace": cfg["namespace"],
+            "annotations": {
+                "opendatahub.io/apiProtocol": "REST",
+                "opendatahub.io/recommended-accelerators": '["nvidia.com/gpu"]',
+                "opendatahub.io/serving-runtime-scope": "global",
+                "opendatahub.io/template-display-name": template_display,
+                "opendatahub.io/template-name": template_name,
+                "openshift.io/display-name": template_display,
+            },
+            "labels": {
+                "opendatahub.io/dashboard": "true",
+            },
+        },
+        "spec": {
+            "annotations": {
+                "prometheus.io/path": "/metrics",
+                "prometheus.io/port": str(cfg["rest_port"]),
+            },
+            "containers": [container],
+            "multiModel": False,
+            "protocolVersions": ["v2", "grpc-v2"],
+            "volumes": [
+                {"name": "shm", "emptyDir": {"medium": "Memory", "sizeLimit": "2Gi"}},
+            ],
+            "supportedModelFormats": [
+                {"name": "onnx", "version": "1", "autoSelect": True},
+                {"name": "tensorflow", "version": "1", "autoSelect": True},
+                {"name": "tensorflow", "version": "2", "autoSelect": True},
+                {"name": "pytorch", "version": "1", "autoSelect": True},
+                {"name": "tensorrt", "version": "8", "autoSelect": True},
+            ],
+        },
+    }
+
+
 def create_serving_runtime(custom_api, cfg):
     """Create or update the ServingRuntime."""
     if not cfg["create_serving_runtime"]:
@@ -369,7 +480,10 @@ def create_serving_runtime(custom_api, cfg):
     print(f"\nCreating ServingRuntime: {cfg['serving_runtime']}...")
     print(f"  Using image: {cfg['runtime_image']}")
 
-    spec = build_serving_runtime_spec(cfg)
+    if cfg["runtime_type"] == "kserve":
+        spec = build_kserve_serving_runtime_spec(cfg)
+    else:
+        spec = build_serving_runtime_spec(cfg)
 
     create_or_update_resource(
         lambda: custom_api.create_namespaced_custom_object(
@@ -396,8 +510,42 @@ def build_inference_service_spec(cfg, model_info, sa_name):
 
     Uses storage.key (namespace) + storage.path pattern matching the Helm
     template, with RawDeployment mode and OpenDataHub annotations.
+    When GPU is enabled, adds nvidia.com/gpu resources and node tolerations.
     """
     isvc_name = cfg["model_name"]
+
+    resources = cfg["resources"]
+    if cfg.get("gpu_enabled"):
+        gpu_res = {"nvidia.com/gpu": cfg.get("gpu_count", "1")}
+        resources = {
+            "requests": {**resources["requests"], **gpu_res},
+            "limits": {**resources["limits"], **gpu_res},
+        }
+
+    predictor = {
+        "automountServiceAccountToken": False,
+        "deploymentStrategy": {"type": "RollingUpdate"},
+        "minReplicas": cfg["replicas_min"],
+        "maxReplicas": cfg["replicas_max"],
+        "model": {
+            "modelFormat": {
+                "name": cfg["model_format"],
+                "version": cfg["model_format_version"],
+            },
+            "name": "",
+            "resources": resources,
+            "runtime": cfg["serving_runtime"],
+            "storage": {
+                "key": cfg["namespace"],
+                "path": model_info["model_path"],
+            },
+        },
+        "serviceAccountName": sa_name,
+    }
+
+    if cfg.get("gpu_tolerations"):
+        predictor["tolerations"] = cfg["gpu_tolerations"]
+
     return {
         "apiVersion": "serving.kserve.io/v1beta1",
         "kind": "InferenceService",
@@ -416,26 +564,7 @@ def build_inference_service_spec(cfg, model_info, sa_name):
             },
         },
         "spec": {
-            "predictor": {
-                "automountServiceAccountToken": False,
-                "deploymentStrategy": {"type": "RollingUpdate"},
-                "minReplicas": cfg["replicas_min"],
-                "maxReplicas": cfg["replicas_max"],
-                "model": {
-                    "modelFormat": {
-                        "name": cfg["model_format"],
-                        "version": cfg["model_format_version"],
-                    },
-                    "name": "",
-                    "resources": cfg["resources"],
-                    "runtime": cfg["serving_runtime"],
-                    "storage": {
-                        "key": cfg["namespace"],
-                        "path": model_info["model_path"],
-                    },
-                },
-                "serviceAccountName": sa_name,
-            }
+            "predictor": predictor,
         },
     }
 
@@ -526,6 +655,7 @@ def deploy():
         model_info = load_model_info_from_s3(cfg)
 
     print("\nDeployment configuration:")
+    print(f"  Runtime Type: {cfg['runtime_type']}")
     print(f"  Model: {model_info['model_name']}")
     print(f"  Version: {model_info['model_version']}")
     print(f"  Namespace: {cfg['namespace']}")

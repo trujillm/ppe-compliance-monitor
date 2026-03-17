@@ -20,14 +20,32 @@ mc mb --ignore-existing myminio/models
 mc mb --ignore-existing myminio/data
 echo "Buckets ready"
 
-# Upload OpenVINO model (only if not exists)
-echo "Checking OpenVINO model files..."
-if ! mc stat myminio/models/ppe/1/ppe.xml >/dev/null 2>&1; then
-	echo "Uploading OpenVINO model (ppe/1/)..."
-	mc cp --recursive /upload/models/ppe/ myminio/models/ppe/
-	echo "OpenVINO model uploaded successfully"
+RUNTIME_TYPE="${RUNTIME_TYPE}"
+echo "Runtime type: ${RUNTIME_TYPE}"
+
+if [ "$RUNTIME_TYPE" = "openvino" ]; then
+	# Upload OpenVINO model (only if not exists)
+	echo "Checking OpenVINO model files..."
+	if ! mc stat myminio/models/ppe/1/ppe.xml >/dev/null 2>&1; then
+		echo "Uploading OpenVINO model (ppe/1/)..."
+		mc cp --recursive /upload/models/ppe/ myminio/models/ppe/
+		echo "OpenVINO model uploaded successfully"
+	else
+		echo "OpenVINO model already exists, skipping"
+	fi
+elif [ "$RUNTIME_TYPE" = "kserve" ]; then
+	# Upload ONNX model in Triton directory layout (only if not exists)
+	echo "Checking ONNX model files..."
+	if ! mc stat myminio/models/ppe-onnx/ppe/1/model.onnx >/dev/null 2>&1; then
+		echo "Uploading ONNX model (ppe-onnx/ppe/1/model.onnx)..."
+		mc cp --recursive /upload/models/ppe-onnx/ myminio/models/ppe-onnx/
+		echo "ONNX model uploaded successfully"
+	else
+		echo "ONNX model already exists, skipping"
+	fi
 else
-	echo "OpenVINO model already exists, skipping"
+	echo "ERROR: Unknown RUNTIME_TYPE '${RUNTIME_TYPE}'. Expected 'openvino' or 'kserve'."
+	exit 1
 fi
 
 # Upload video (only if not exists)

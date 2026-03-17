@@ -77,10 +77,20 @@ spec:
             - name: VIDEO_STREAM_URL
               value: "rtsp://{{ include "ppe-compliance-monitor.fullname" . }}-video-stream.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.videoStream.port }}/{{ .Values.videoStream.path }}"
             {{- end }}
+            - name: RUNTIME_TYPE
+              value: {{ .Values.modelServing.runtimeType | quote }}
             - name: SERVICE_URL
-              value: "http://ppe-predictor.{{ .Release.Namespace }}.svc.cluster.local:8888"
+              {{- if eq .Values.modelServing.runtimeType "kserve" }}
+              value: "http://ppe-predictor.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.modelServing.kserve.restPort }}"
+              {{- else }}
+              value: "ppe-predictor.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.modelServing.openvino.grpcPort }}"
+              {{- end }}
             - name: MODEL_INPUT_NAME
+              {{- if eq .Values.modelServing.runtimeType "kserve" }}
+              value: {{ .Values.modelServing.kserve.modelInputName | quote }}
+              {{- else }}
               value: {{ .Values.backend.modelInputName | quote }}
+              {{- end }}
             - name: MODEL_NAME
               value: {{ .Values.backend.modelName | quote }}
             - name: MODEL_VERSION

@@ -123,10 +123,8 @@ runtimeDeployer:
 modelServing:
   enabled: true
   name: "" # Defaults to Release.Namespace + "-deploy"
-  modelFormat:
-    name: pytorch
-    version: "2"
-  modelPath: ppe
+  # Runtime type: "openvino" (OVMS, current default) or "kserve" (V2/OIP REST with ONNX)
+  runtimeType: kserve
   deploymentMode: RawDeployment
   auth: false
   replicas:
@@ -138,11 +136,39 @@ modelServing:
       memory: 4Gi
     limits:
       cpu: "4"
-      memory: 4Gi
-  runtime:
+      memory: 16Gi
+  # OpenVINO Model Server config (used when runtimeType=openvino)
+  openvino:
     image: "registry.redhat.io/rhoai/odh-openvino-model-server-rhel9@sha256:7daebf4a4205b9b81293932a1dfec705f59a83de8097e468e875088996c1f224"
     restPort: 8888
     grpcPort: 8001
+    modelFormat:
+      name: pytorch
+      version: "2"
+    modelPath: ppe
+  # KServe-native runtime config (used when runtimeType=kserve)
+  # NVIDIA Triton Inference Server -- GPU-accelerated ONNX serving via V2/OIP REST
+  kserve:
+    gpu:
+      enabled: true
+      count: "1"
+      tolerations:
+        - key: g5-gpu
+          operator: Exists
+          effect: NoSchedule
+    image: "nvcr.io/nvidia/tritonserver:24.08-py3"
+    restPort: 8000
+    grpcPort: 9000
+    command: []
+    args: []
+    env: {}
+    modelFormat:
+      name: onnx
+      version: "1"
+    modelPath: ppe-onnx
+    modelInputName: images
+    templateName: kserve-tritonserver
+    templateDisplayName: "NVIDIA Triton Inference Server"
 
 openshift:
   sharedHost: ""
