@@ -19,7 +19,7 @@ RUN cd data && 7z x combined-video-no-gap-rooftop.mp4.7z.001
 # Copy the existing ppe.pt model (not compressed)
 COPY models/ppe.pt ./models/
 
-# Stage 2: Export model to OpenVINO format
+# Stage 2: Export model to OpenVINO IR + ONNX formats
 FROM docker.io/ultralytics/ultralytics:latest-cpu AS exporter
 
 COPY --from=extractor /extract/models/ppe.pt /tmp/ppe.pt
@@ -28,7 +28,10 @@ RUN pip install git+https://github.com/openai/CLIP.git && \
     yolo export model=/tmp/ppe.pt format=openvino task=detect && \
     mkdir -p /exported/ppe/1 && \
     cp /tmp/ppe_openvino_model/*.xml /exported/ppe/1/ppe.xml && \
-    cp /tmp/ppe_openvino_model/*.bin /exported/ppe/1/ppe.bin
+    cp /tmp/ppe_openvino_model/*.bin /exported/ppe/1/ppe.bin && \
+    yolo export model=/tmp/ppe.pt format=onnx task=detect && \
+    mkdir -p /exported/ppe-onnx/ppe/1 && \
+    cp /tmp/ppe.onnx /exported/ppe-onnx/ppe/1/model.onnx
 
 # Stage 3: Create uploader image with mc CLI
 FROM docker.io/minio/mc:latest
@@ -43,13 +46,16 @@ COPY --from=extractor /extract/models/ppe.pt /upload/models/
 # Copy exported OpenVINO model
 COPY --from=exporter /exported/ppe/1/ /upload/models/ppe/1/
 
+# Copy exported ONNX model
+COPY --from=exporter /exported/ppe-onnx/ /upload/models/ppe-onnx/
+
 # Copy upload script
 COPY data-image/upload.sh /upload/upload.sh
 RUN chmod +x /upload/upload.sh
 
 # Default environment variables (can be overridden)
-ENV MINIO_ENDPOINT=http://minio:9000
-ENV MINIO_ACCESS_KEY=minioadmin
-ENV MINIO_SECRET_KEY=minioadmin
+ENV MINIO_ENDPOINT=http://minio:9000 \
+    MINIO_ACCESS_KEY=minioadmin \
+    MINIO_SECRET_KEY=minioadmin
 
 ENTRYPOINT ["/bin/sh", "/upload/upload.sh"]

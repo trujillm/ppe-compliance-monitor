@@ -30,4 +30,6 @@ spec:
               value: {{ .Values.minio.secret.user | quote }}
             - name: MINIO_SECRET_KEY
               value: {{ .Values.minio.secret.password | quote }}
+            - name: RUNTIME_TYPE
+              value: {{ .Values.modelServing.runtimeType | quote }}
 {{- end }}

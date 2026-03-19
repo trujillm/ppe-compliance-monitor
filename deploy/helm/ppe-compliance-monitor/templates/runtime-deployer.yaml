@@ -137,12 +137,19 @@ spec:
           env:
             - name: NAMESPACE
               value: {{ .Release.Namespace }}
+            - name: RUNTIME_TYPE
+              value: {{ .Values.modelServing.runtimeType | quote }}
             - name: DEPLOY_MODEL
               value: "true"
             - name: S3_BUCKET
               value: {{ index .Values.minio.bucketCreation.buckets 0 | quote }}
+            {{- if eq .Values.modelServing.runtimeType "kserve" }}
             - name: S3_MODEL_PATH
-              value: {{ .Values.modelServing.modelPath | quote }}
+              value: {{ .Values.modelServing.kserve.modelPath | quote }}
+            {{- else }}
+            - name: S3_MODEL_PATH
+              value: {{ .Values.modelServing.openvino.modelPath | quote }}
+            {{- end }}
             - name: MINIO_ENDPOINT
               value: "http://{{ .Values.minio.secret.host }}:{{ .Values.minio.secret.port }}"
             - name: MINIO_ACCESS_KEY
@@ -153,16 +160,47 @@ spec:
               value: {{ .Values.backend.modelName | quote }}
             - name: MODEL_VERSION
               value: {{ .Values.backend.modelVersion | quote }}
+            {{- if eq .Values.modelServing.runtimeType "kserve" }}
             - name: MODEL_FORMAT
-              value: {{ .Values.modelServing.modelFormat.name | quote }}
+              value: {{ .Values.modelServing.kserve.modelFormat.name | quote }}
             - name: MODEL_FORMAT_VERSION
-              value: {{ .Values.modelServing.modelFormat.version | quote }}
+              value: {{ .Values.modelServing.kserve.modelFormat.version | quote }}
             - name: SERVING_RUNTIME_IMAGE
-              value: {{ .Values.modelServing.runtime.image | quote }}
+              value: {{ .Values.modelServing.kserve.image | quote }}
             - name: REST_PORT
-              value: {{ .Values.modelServing.runtime.restPort | quote }}
+              value: {{ .Values.modelServing.kserve.restPort | quote }}
             - name: GRPC_PORT
-              value: {{ .Values.modelServing.runtime.grpcPort | quote }}
+              value: {{ .Values.modelServing.kserve.grpcPort | quote }}
+            - name: RUNTIME_ARGS
+              value: {{ .Values.modelServing.kserve.args | toJson | quote }}
+            - name: RUNTIME_COMMAND
+              value: {{ .Values.modelServing.kserve.command | toJson | quote }}
+            - name: RUNTIME_ENV
+              value: {{ .Values.modelServing.kserve.env | toJson | quote }}
+            - name: RUNTIME_TEMPLATE_NAME
+              value: {{ .Values.modelServing.kserve.templateName | quote }}
+            - name: RUNTIME_TEMPLATE_DISPLAY_NAME
+              value: {{ .Values.modelServing.kserve.templateDisplayName | quote }}
+            {{- if .Values.modelServing.kserve.gpu.enabled }}
+            - name: GPU_ENABLED
+              value: "true"
+            - name: GPU_COUNT
+              value: {{ .Values.modelServing.kserve.gpu.count | quote }}
+            - name: GPU_TOLERATIONS
+              value: {{ .Values.modelServing.kserve.gpu.tolerations | toJson | quote }}
+            {{- end }}
+            {{- else }}
+            - name: MODEL_FORMAT
+              value: {{ .Values.modelServing.openvino.modelFormat.name | quote }}
+            - name: MODEL_FORMAT_VERSION
+              value: {{ .Values.modelServing.openvino.modelFormat.version | quote }}
+            - name: SERVING_RUNTIME_IMAGE
+              value: {{ .Values.modelServing.openvino.image | quote }}
+            - name: REST_PORT
+              value: {{ .Values.modelServing.openvino.restPort | quote }}
+            - name: GRPC_PORT
+              value: {{ .Values.modelServing.openvino.grpcPort | quote }}
+            {{- end }}
             - name: CREATE_SERVING_RUNTIME
               value: "true"
             - name: REPLICAS_MIN
@@ -177,80 +215,4 @@ spec:
               value: {{ .Values.modelServing.resources.limits.cpu | quote }}
             - name: RESOURCE_LIM_MEMORY
               value: {{ .Values.modelServing.resources.limits.memory | quote }}
-{{/*
-
----
-# ──────────────────────────────────────────────
-# 6b. Deployment  –  debug pod for create_runtime.py
-# ──────────────────────────────────────────────
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ $saName }}-debug
-  labels:
-    {{- include "ppe-compliance-monitor.labels" . | nindent 4 }}
-    app.kubernetes.io/component: runtime-deployer-debug
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/component: runtime-deployer-debug
-  template:
-    metadata:
-      labels:
-        {{- include "ppe-compliance-monitor.labels" . | nindent 8 }}
-        app.kubernetes.io/component: runtime-deployer-debug
-    spec:
-      serviceAccountName: {{ $saName }}
-      containers:
-        - name: runtime-deployer
-          image: "{{ .Values.runtimeDeployer.image.repository }}:{{ .Values.runtimeDeployer.image.tag }}"
-          imagePullPolicy: {{ .Values.runtimeDeployer.image.pullPolicy }}
-          command: ["sleep", "infinity"]
-          env:
-            - name: NAMESPACE
-              value: {{ .Release.Namespace }}
-            - name: DEPLOY_MODEL
-              value: "true"
-            - name: S3_BUCKET
-              value: {{ index .Values.minio.bucketCreation.buckets 0 | quote }}
-            - name: S3_MODEL_PATH
-              value: {{ .Values.modelServing.modelPath | quote }}
-            - name: MINIO_ENDPOINT
-              value: "http://{{ .Values.minio.secret.host }}:{{ .Values.minio.secret.port }}"
-            - name: MINIO_ACCESS_KEY
-              value: {{ .Values.minio.secret.user | quote }}
-            - name: MINIO_SECRET_KEY
-              value: {{ .Values.minio.secret.password | quote }}
-            - name: MODEL_NAME
-              value: {{ .Values.backend.modelName | quote }}
-            - name: MODEL_VERSION
-              value: {{ .Values.backend.modelVersion | quote }}
-            - name: MODEL_FORMAT
-              value: {{ .Values.modelServing.modelFormat.name | quote }}
-            - name: MODEL_FORMAT_VERSION
-              value: {{ .Values.modelServing.modelFormat.version | quote }}
-            - name: SERVING_RUNTIME_IMAGE
-              value: {{ .Values.modelServing.runtime.image | quote }}
-            - name: REST_PORT
-              value: {{ .Values.modelServing.runtime.restPort | quote }}
-            - name: GRPC_PORT
-              value: {{ .Values.modelServing.runtime.grpcPort | quote }}
-            - name: CREATE_SERVING_RUNTIME
-              value: "true"
-            - name: REPLICAS_MIN
-              value: {{ .Values.modelServing.replicas.min | quote }}
-            - name: REPLICAS_MAX
-              value: {{ .Values.modelServing.replicas.max | quote }}
-            - name: RESOURCE_REQ_CPU
-              value: {{ .Values.modelServing.resources.requests.cpu | quote }}
-            - name: RESOURCE_REQ_MEMORY
-              value: {{ .Values.modelServing.resources.requests.memory | quote }}
-            - name: RESOURCE_LIM_CPU
-              value: {{ .Values.modelServing.resources.limits.cpu | quote }}
-            - name: RESOURCE_LIM_MEMORY
-              value: {{ .Values.modelServing.resources.limits.memory | quote }}
-
-*/}}
-
 {{- end }}
