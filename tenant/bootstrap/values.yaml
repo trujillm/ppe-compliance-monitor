@@ -1,0 +1,28 @@
+deployer:
+  domain: "apps.cluster-guid.example.com"
+  apiUrl: "https://api.cluster-guid.example.com"
+  guid: "abcde"
+
+tenant:
+  name: "tenant-name"
+  user:
+    name: "user-name"
+    password: "user-password"
+
+gitops:
+  namespace: openshift-gitops
+  applicationControllerServiceAccount: openshift-gitops-argocd-application-controller
+
+ppe:
+  namespace: ppe
+  git:
+    url: https://github.com/rh-ai-quickstart/ppe-compliance-monitor.git
+    revision: main
+    path: deploy/helm/ppe-compliance-monitor
+  values:
+    openai:
+      apiToken: ""
+      apiEndpoint: ""
+      model: ""
+    modelServing:
+      runtimeType: openvino
