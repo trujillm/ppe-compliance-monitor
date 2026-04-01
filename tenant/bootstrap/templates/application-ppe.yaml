@@ -1,0 +1,32 @@
+{{ if .Values.ppe -}}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .Values.tenant.name }}
+  namespace: {{ .Values.gitops.namespace }}
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.ppe.git.url }}
+    targetRevision: {{ .Values.ppe.git.revision }}
+    path: {{ .Values.ppe.git.path }}
+    helm:
+      values: |
+{{ toYaml .Values.ppe.values | nindent 12 }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: '{{ .Values.ppe.namespace }}'
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 30
+      backoff:
+        duration: "5s"
+        factor: 2
+        maxDuration: "5m"
+{{- end }}
