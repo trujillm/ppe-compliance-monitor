@@ -13,6 +13,9 @@ spec:
     path: {{ .Values.ppe.git.path }}
     helm:
       releaseName: "ppe-{{ .Values.tenant.name }}"
+      parameters:
+        - name: openshift.sharedHost
+          value: "ppe-{{ .Values.tenant.name }}-{{ .Values.ppe.namespace }}.{{ .Values.deployer.domain }}"
       values: |
 {{ toYaml .Values.ppe.values | nindent 12 }}
   destination:
