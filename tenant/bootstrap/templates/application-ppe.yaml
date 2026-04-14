@@ -12,6 +12,7 @@ spec:
     targetRevision: {{ .Values.ppe.git.revision }}
     path: {{ .Values.ppe.git.path }}
     helm:
+      releaseName: "ppe-{{ .Values.tenant.name }}"
       values: |
 {{ toYaml .Values.ppe.values | nindent 12 }}
   destination:
